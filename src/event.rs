@@ -193,7 +193,7 @@ impl EventHandler {
     }
 
     fn handle_resource_dashboard(_app: &mut App, _key: KeyEvent) {
-        // 资源看板主要是只读展示，按 R 刷新
+        // 资源看板主要是只读展示
     }
 
     fn handle_editing(app: &mut App, key: KeyEvent) -> EventResult {

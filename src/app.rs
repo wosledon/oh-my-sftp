@@ -1,41 +1,25 @@
-#[allow(dead_code)]
 use crate::core::config::AppSettings;
 use crate::core::connection::{ActiveSession, Connection, Panel, SystemResources, TransferTask};
 use crate::services::sftp_service::SftpEntry;
 use std::path::PathBuf;
-use std::sync::mpsc;
 
 /// 本地终端状态
-#[allow(dead_code)]
 pub struct LocalTerminal {
-    pub writer: Option<Box<dyn std::io::Write + Send>>,
-    /// PTY 输出 channel 接收端（后台线程写入，主线程读取）
-    pub pty_rx: Option<mpsc::Receiver<String>>,
-    /// 保持 PTY pair 存活（同时保持 child process 存活）
-    pub _pty_pair: Option<portable_pty::PtyPair>,
-    /// 保持子进程存活，防止被提前终止
-    pub _child: Option<Box<dyn portable_pty::Child + Send>>,
     pub output: String,
-    pub scrollback: Vec<String>,
 }
 
 /// 远程终端状态
-#[allow(dead_code)]
 pub struct RemoteTerminal {
     pub output: String,
-    pub scrollback: Vec<String>,
 }
 
 /// 文件管理面板状态
-#[allow(dead_code)]
 pub struct FileManagerState {
     pub entries: Vec<SftpEntry>,
     pub selected_index: usize,
-    pub scroll_offset: usize,
 }
 
 /// 编辑器状态
-#[allow(dead_code)]
 pub struct EditorState {
     pub file_path: String,
     pub content: String,
@@ -44,15 +28,12 @@ pub struct EditorState {
 }
 
 /// 连接列表面板状态
-#[allow(dead_code)]
 pub struct ConnectionListState {
     pub connections: Vec<Connection>,
     pub selected_index: usize,
-    pub scroll_offset: usize,
 }
 
 /// 面板状态集合
-#[allow(dead_code)]
 pub struct PanelsState {
     pub connection_list: ConnectionListState,
     pub file_manager: FileManagerState,
@@ -60,7 +41,6 @@ pub struct PanelsState {
 }
 
 /// 全局应用状态
-#[allow(dead_code)]
 pub struct App {
     // 连接管理
     pub connections: Vec<Connection>,
@@ -97,12 +77,8 @@ pub struct App {
 
     // 资源刷新相关
     pub last_resource_refresh: std::time::Instant,
-
-    // PTY 初始化状态
-    pub pty_init_done: bool,
 }
 
-#[allow(dead_code)]
 impl App {
     pub fn new() -> Self {
         Self {
@@ -114,19 +90,18 @@ impl App {
                 connection_list: ConnectionListState {
                     connections: Vec::new(),
                     selected_index: 0,
-                    scroll_offset: 0,
                 },
                 file_manager: FileManagerState {
                     entries: Vec::new(),
                     selected_index: 0,
-                    scroll_offset: 0,
                 },
                 editor: None,
             },
-            local_terminal: None,
+            local_terminal: Some(LocalTerminal {
+                output: String::new(),
+            }),
             remote_terminal: RemoteTerminal {
                 output: String::new(),
-                scrollback: Vec::new(),
             },
             local_cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             remote_cwd: PathBuf::from("/"),
@@ -139,7 +114,6 @@ impl App {
             editing_connection: false,
             settings: AppSettings::default(),
             last_resource_refresh: std::time::Instant::now(),
-            pty_init_done: false,
         }
     }
 
