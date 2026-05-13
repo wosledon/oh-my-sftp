@@ -4,373 +4,342 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
     Frame,
 };
 
-/// 渲染主界面
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    // 主布局：垂直分割
-    let main_chunks = Layout::default()
+    let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // 标题栏
-            Constraint::Min(1),    // 主内容区
-            Constraint::Length(1), // 状态栏
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
         ])
         .split(area);
 
-    render_title_bar(frame, main_chunks[0], app);
-    render_main_content(frame, main_chunks[1], app);
-    render_status_bar(frame, main_chunks[2], app);
+    render_title_bar(frame, chunks[0], app);
+    render_main(frame, chunks[1], app);
+    render_status_bar(frame, chunks[2], app);
 }
+
+// --- title bar ---
 
 fn render_title_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let host_info = app
-        .current_host()
-        .map(|h| format!(" | {}", h))
-        .unwrap_or_default();
+    let bg = Block::default().style(Style::default().bg(Color::Blue));
+    frame.render_widget(bg, area);
 
-    let title = format!(
-        "oh-my-sftp v0.1.0{} | [{}]",
-        host_info,
-        panel_name(&app.active_panel)
+    let title = format!(" oh-my-sftp v0.1.0 | [{}] ", panel_name(&app.active_panel));
+    frame.render_widget(
+        Paragraph::new(title).style(Style::default().fg(Color::White).bg(Color::Blue)),
+        area,
     );
-
-    let title_widget = Paragraph::new(title)
-        .style(Style::default().fg(Color::White).bg(Color::DarkGray))
-        .alignment(ratatui::layout::Alignment::Left);
-
-    frame.render_widget(title_widget, area);
 }
 
-fn render_main_content(frame: &mut Frame, area: Rect, app: &App) {
+// --- main content ---
+
+fn render_main(frame: &mut Frame, area: Rect, app: &App) {
+    // 先填充整个主内容区背景
+    let bg = Block::default().style(Style::default().bg(Color::Black));
+    frame.render_widget(bg, area);
+
     if app.show_connection_list {
-        // 显示连接列表面板在主内容区
-        let chunks = Layout::default()
+        let cols = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
             .split(area);
-
-        render_connection_list(frame, chunks[0], app);
-        render_panel_content(frame, chunks[1], app);
+        render_conn_list(frame, cols[0], app);
+        render_panel(frame, cols[1], app);
     } else {
-        render_panel_content(frame, area, app);
+        render_panel(frame, area, app);
     }
 }
 
-fn render_panel_content(frame: &mut Frame, area: Rect, app: &App) {
+fn render_panel(frame: &mut Frame, area: Rect, app: &App) {
     match app.active_panel {
-        Panel::Terminal => render_terminal_panel(frame, area, app),
-        Panel::FileManager => render_file_manager_panel(frame, area, app),
-        Panel::ResourceDashboard => render_resource_dashboard(frame, area, app),
-        Panel::ConnectionList => render_connection_list(frame, area, app),
+        Panel::Terminal => render_terminal(frame, area, app),
+        Panel::FileManager => render_files(frame, area, app),
+        Panel::ResourceDashboard => render_dashboard(frame, area, app),
+        Panel::ConnectionList => render_conn_list(frame, area, app),
     }
 }
 
-// ─── 连接列表 ───────────────────────────────────────────
+// --- connection list ---
 
-fn render_connection_list(frame: &mut Frame, area: Rect, app: &App) {
-    let items: Vec<ListItem> = app
-        .panels
-        .connection_list
-        .connections
-        .iter()
-        .enumerate()
-        .map(|(i, conn)| {
-            let is_selected = i == app.panels.connection_list.selected_index;
-            let style = if is_selected {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
+fn render_conn_list(frame: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .title(" Connections ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-            let line = format!(" {} ({}@{})", conn.name, conn.username, conn.host);
-            ListItem::new(Line::from(Span::styled(line, style)))
-        })
-        .collect();
+    let cons = &app.panels.connection_list.connections;
+    let items: Vec<ListItem> = if cons.is_empty() {
+        vec![ListItem::new(" (none)")]
+    } else {
+        cons.iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let s = if i == app.panels.connection_list.selected_index {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(Line::from(Span::styled(
+                    format!(" {} ({}@{})", c.name, c.username, c.host),
+                    s,
+                )))
+            })
+            .collect()
+    };
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title(" Connections ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
-
-    frame.render_widget(list, area);
+    let list = List::new(items).highlight_style(Style::default().bg(Color::DarkGray));
+    frame.render_widget(list, inner);
 }
 
-// ─── 终端面板 ───────────────────────────────────────────
+// --- terminal ---
 
-fn render_terminal_panel(frame: &mut Frame, area: Rect, app: &App) {
-    let chunks = Layout::default()
+fn render_terminal(frame: &mut Frame, area: Rect, app: &App) {
+    let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(3), Constraint::Length(3)])
         .split(area);
 
-    // 终端输出区域
-    let output_text = if app.is_connected() {
+    // body
+    let body_block = Block::default()
+        .title(term_title(app))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green));
+    let body_inner = body_block.inner(rows[0]);
+    frame.render_widget(body_block, rows[0]);
+
+    let body = term_body(app);
+    frame.render_widget(
+        Paragraph::new(body).style(Style::default().fg(Color::White)),
+        body_inner,
+    );
+
+    // input
+    let input_block = Block::default()
+        .title(" Input ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+    let input_inner = input_block.inner(rows[1]);
+    frame.render_widget(input_block, rows[1]);
+
+    let txt = if app.command_input.is_empty() {
+        "> _".to_string()
+    } else {
+        format!("> {}", app.command_input)
+    };
+    frame.render_widget(
+        Paragraph::new(txt).style(Style::default().fg(Color::White)),
+        input_inner,
+    );
+
+    let cx = input_inner.x + 2 + app.command_input.len() as u16;
+    if cx < input_inner.right() {
+        frame.set_cursor_position((cx, input_inner.y));
+    }
+}
+
+fn term_title(app: &App) -> String {
+    if app.is_connected() {
+        format!(
+            " {}@{} ",
+            app.connections
+                .iter()
+                .find(|c| app
+                    .active_session
+                    .as_ref()
+                    .map_or(false, |s| s.connection_id == c.id))
+                .map(|c| c.username.as_str())
+                .unwrap_or("user"),
+            app.current_host().unwrap_or("")
+        )
+    } else {
+        " Terminal ".to_string()
+    }
+}
+
+fn term_body(app: &App) -> String {
+    if app.is_connected() {
         if app.remote_terminal.output.is_empty() {
             format!(
-                "Connected to {} — Type commands below\n",
-                app.current_host().unwrap_or("unknown")
+                "Connected to {}.\nType 'help' for commands.\n",
+                app.current_host().unwrap_or("")
             )
         } else {
             app.remote_terminal.output.clone()
         }
     } else if let Some(ref local) = app.local_terminal {
         if local.output.is_empty() {
-            String::from(
-                "Local Terminal — Shell started, waiting for output...\n\
-                 Press Ctrl+O to open connection list\n",
-            )
+            "Local terminal started. Waiting...\nCtrl+O open connections | Type 'help' for commands\n".to_string()
         } else {
             local.output.clone()
         }
     } else {
-        String::from(
-            "╔══════════════════════════════════════════════╗\n\
-             ║         oh-my-sftp — Terminal Mode           ║\n\
-             ╠══════════════════════════════════════════════╣\n\
-             ║  Ctrl+O  Open connection list               ║\n\
-             ║  Ctrl+T  Terminal panel                     ║\n\
-             ║  Ctrl+F  File manager                       ║\n\
-             ║  Ctrl+D  Resource dashboard                 ║\n\
-             ║  Tab     Switch panels                      ║\n\
-             ║  Ctrl+C  Quit                               ║\n\
-             ╠══════════════════════════════════════════════╣\n\
-             ║  Type commands in the input box below       ║\n\
-             ╚══════════════════════════════════════════════╝\n\
-             \n\
-             Local PTY: not available\n",
+        let hint = if app.status_message.contains("PTY init") {
+            "PTY initializing in background..."
+        } else {
+            &app.status_message
+        };
+        format!(
+            "{}\n\n\
+            --- Commands ---\n\n\
+            help        Show this help\n\
+            clear       Clear terminal\n\
+            exit        Quit\n\
+            list        List connections\n\
+            connect N   Connect to server N\n\
+            disconnect  Disconnect\n\
+            status      Show status\n\n\
+            --- Hotkeys ---\n\n\
+            Ctrl+O      Connection list\n\
+            Ctrl+T      Terminal\n\
+            Ctrl+C      Quit\n\n\
+            Type in the input box below.\n",
+            hint
         )
-    };
-
-    let terminal_block = Paragraph::new(output_text)
-        .block(
-            Block::default()
-                .title(if app.is_connected() {
-                    format!(
-                        " {}@{} ",
-                        app.connections
-                            .iter()
-                            .find(|c| app
-                                .active_session
-                                .as_ref()
-                                .map_or(false, |s| s.connection_id == c.id))
-                            .map(|c| c.username.as_str())
-                            .unwrap_or("user"),
-                        app.current_host().unwrap_or("")
-                    )
-                } else {
-                    " Local Terminal ".to_string()
-                })
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green)),
-        )
-        .wrap(Wrap { trim: false })
-        .scroll((app.remote_terminal.scrollback.len() as u16, 0));
-
-    frame.render_widget(terminal_block, chunks[0]);
-
-    // 命令输入区域
-    let input_widget = Paragraph::new(app.command_input.as_str())
-        .block(
-            Block::default()
-                .title(" Command ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow)),
-        )
-        .style(Style::default().fg(Color::White));
-
-    frame.render_widget(input_widget, chunks[1]);
-
-    // 光标位置（简化：固定在输入区末尾）
-    if !app.command_input.is_empty() {
-        frame.set_cursor_position((
-            chunks[1].x + app.command_input.len() as u16 + 1,
-            chunks[1].y + 1,
-        ));
     }
 }
 
-// ─── 文件管理面板 ───────────────────────────────────────
+// --- file manager ---
 
-fn render_file_manager_panel(frame: &mut Frame, area: Rect, app: &App) {
-    let chunks = Layout::default()
+fn render_files(frame: &mut Frame, area: Rect, app: &App) {
+    let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
-    // 左侧：本地文件浏览占位
-    let local_block = Block::default()
+    let lb = Block::default()
         .title(format!(" Local: {} ", app.local_cwd.display()))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Blue));
+    let li = lb.inner(cols[0]);
+    frame.render_widget(lb, cols[0]);
+    frame.render_widget(Paragraph::new("(local files - coming soon)"), li);
 
-    let local_text = Paragraph::new("Local file listing (coming soon)")
-        .block(local_block)
-        .wrap(Wrap { trim: false });
+    let rb = Block::default()
+        .title(format!(" Remote: {} ", app.remote_cwd.display()))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta));
+    let ri = rb.inner(cols[1]);
+    frame.render_widget(rb, cols[1]);
 
-    frame.render_widget(local_text, chunks[0]);
-
-    // 右侧：远程文件列表
     let entries: Vec<ListItem> = app
         .panels
         .file_manager
         .entries
         .iter()
         .enumerate()
-        .map(|(i, entry)| {
-            let is_selected = i == app.panels.file_manager.selected_index;
-            let icon = if entry.is_dir { "📁" } else { "📄" };
-            let style = if is_selected {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else if entry.is_dir {
-                Style::default().fg(Color::Cyan)
+        .map(|(i, e)| {
+            let s = if i == app.panels.file_manager.selected_index {
+                Style::default().fg(Color::Yellow)
             } else {
-                Style::default().fg(Color::White)
+                Style::default()
             };
-
-            let line = format!(" {} {:<30} {:>10}", icon, entry.name, entry.format_size());
-            ListItem::new(Line::from(Span::styled(line, style)))
+            let icon = if e.is_dir { "[D]" } else { "[F]" };
+            ListItem::new(Line::from(Span::styled(format!(" {} {}", icon, e.name), s)))
         })
         .collect();
 
-    let remote_list = List::new(entries)
-        .block(
-            Block::default()
-                .title(format!(" Remote: {} ", app.remote_cwd.display()))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Magenta)),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
-
-    frame.render_widget(remote_list, chunks[1]);
+    frame.render_widget(List::new(entries), ri);
 }
 
-// ─── 资源看板 ───────────────────────────────────────────
+// --- dashboard ---
 
-fn render_resource_dashboard(frame: &mut Frame, area: Rect, app: &App) {
-    let chunks = Layout::default()
+fn render_dashboard(frame: &mut Frame, area: Rect, app: &App) {
+    let r = &app.resources;
+    let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // CPU
-            Constraint::Length(3), // 内存
-            Constraint::Length(3), // 磁盘
-            Constraint::Length(1), // 负载
-            Constraint::Length(1), // 运行时间
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(2),
         ])
         .split(area);
 
-    let r = &app.resources;
-
-    // CPU 使用率
-    let cpu_label = format!(" CPU: {:.1}% ", r.cpu_usage);
-    let cpu_gauge = Gauge::default()
-        .block(Block::default().title(cpu_label).borders(Borders::ALL))
-        .gauge_style(
-            Style::default()
-                .fg(cpu_color(r.cpu_usage))
-                .add_modifier(Modifier::BOLD),
-        )
+    let cpu_g = Gauge::default()
+        .block(Block::bordered().title(format!(" CPU: {:.1}% ", r.cpu_usage)))
+        .gauge_style(Style::default().fg(cpu_c(r.cpu_usage)))
         .percent(r.cpu_usage as u16);
-    frame.render_widget(cpu_gauge, chunks[0]);
+    frame.render_widget(cpu_g, rows[0]);
 
-    // 内存使用率
-    let mem_percent = if r.memory_total_mb > 0 {
+    let mp = if r.memory_total_mb > 0 {
         (r.memory_used_mb as f64 / r.memory_total_mb as f64 * 100.0) as u16
     } else {
         0
     };
-    let mem_label = format!(
-        " Memory: {}MB / {}MB ({:.1}%) ",
-        r.memory_used_mb, r.memory_total_mb, mem_percent
-    );
-    let mem_gauge = Gauge::default()
-        .block(Block::default().title(mem_label).borders(Borders::ALL))
-        .gauge_style(
-            Style::default()
-                .fg(mem_color(mem_percent))
-                .add_modifier(Modifier::BOLD),
-        )
-        .percent(mem_percent);
-    frame.render_widget(mem_gauge, chunks[1]);
+    let mem_g = Gauge::default()
+        .block(Block::bordered().title(format!(
+            " Memory: {}M / {}M ({}%) ",
+            r.memory_used_mb, r.memory_total_mb, mp
+        )))
+        .gauge_style(Style::default().fg(mem_c(mp)))
+        .percent(mp);
+    frame.render_widget(mem_g, rows[1]);
 
-    // 磁盘使用率
-    let disk_percent = if r.disk_total_gb > 0.0 {
+    let dp = if r.disk_total_gb > 0.0 {
         ((r.disk_used_gb / r.disk_total_gb) * 100.0) as u16
     } else {
         0
     };
-    let disk_label = format!(
-        " Disk: {:.1}GB / {:.1}GB ({:.1}%) ",
-        r.disk_used_gb, r.disk_total_gb, disk_percent
-    );
-    let disk_gauge = Gauge::default()
-        .block(Block::default().title(disk_label).borders(Borders::ALL))
-        .gauge_style(
-            Style::default()
-                .fg(disk_color(disk_percent))
-                .add_modifier(Modifier::BOLD),
-        )
-        .percent(disk_percent);
-    frame.render_widget(disk_gauge, chunks[2]);
+    let disk_g = Gauge::default()
+        .block(Block::bordered().title(format!(
+            " Disk: {:.1}G / {:.1}G ({}%) ",
+            r.disk_used_gb, r.disk_total_gb, dp
+        )))
+        .gauge_style(Style::default().fg(disk_c(dp)))
+        .percent(dp);
+    frame.render_widget(disk_g, rows[2]);
 
-    // 系统负载
-    let load_text = format!(
-        " Load Average: {:.2} {:.2} {:.2} | Uptime: {} ",
+    let info = format!(
+        " Load: {:.1} {:.1} {:.1}  |  Uptime: {} ",
         r.load_average[0], r.load_average[1], r.load_average[2], r.uptime
     );
-    let load_widget = Paragraph::new(load_text)
-        .style(Style::default().fg(Color::Gray))
-        .block(Block::default().borders(Borders::NONE));
-    frame.render_widget(load_widget, chunks[3]);
-
-    // 快捷键提示
-    let help_text = " [R] Refresh  |  [Ctrl+T] Terminal  |  [Ctrl+F] Files  |  [Ctrl+D] Dashboard ";
-    let help_widget = Paragraph::new(help_text).style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(help_widget, chunks[4]);
+    frame.render_widget(
+        Paragraph::new(info).style(Style::default().fg(Color::Gray)),
+        rows[3],
+    );
 }
 
-// ─── 状态栏 ─────────────────────────────────────────────
+// --- status bar ---
 
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let (left, right) = {
-        let status = format!(
-            " {} | {} connections | {} transfers ",
-            app.status_message,
-            app.connection_count(),
-            app.transfer_queue.len()
-        );
-        let time = chrono::Local::now().format("%H:%M:%S").to_string();
-        (status, time)
-    };
+    let bg = Block::default().style(Style::default().bg(Color::Blue));
+    frame.render_widget(bg, area);
 
-    let left_len = left.len();
-    let status_line = Line::from(vec![
-        Span::styled(left, Style::default().fg(Color::White).bg(Color::DarkGray)),
-        Span::styled(
-            format!("{:>width$}", right, width = area.width as usize - left_len),
-            Style::default().fg(Color::Gray).bg(Color::DarkGray),
-        ),
-    ]);
+    let left = format!(
+        " {} | {} conns | {} tx ",
+        app.status_message,
+        app.connection_count(),
+        app.transfer_queue.len()
+    );
+    let time = chrono::Local::now().format("%H:%M:%S").to_string();
+    let w = area.width as usize;
+    let pad = w.saturating_sub(left.len() + time.len());
 
-    frame.render_widget(Paragraph::new(status_line), area);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(left, Style::default().fg(Color::White).bg(Color::Blue)),
+            Span::styled(" ".repeat(pad), Style::default().bg(Color::Blue)),
+            Span::styled(time, Style::default().fg(Color::Gray).bg(Color::Blue)),
+        ])),
+        area,
+    );
 }
 
-// ─── 辅助函数 ───────────────────────────────────────────
+// --- helpers ---
 
-fn panel_name(panel: &Panel) -> &str {
-    match panel {
+fn panel_name(p: &Panel) -> &str {
+    match p {
         Panel::Terminal => "Terminal",
         Panel::FileManager => "Files",
         Panel::ResourceDashboard => "Dashboard",
@@ -378,30 +347,28 @@ fn panel_name(panel: &Panel) -> &str {
     }
 }
 
-fn cpu_color(usage: f64) -> Color {
-    if usage > 90.0 {
+fn cpu_c(v: f64) -> Color {
+    if v > 90.0 {
         Color::Red
-    } else if usage > 70.0 {
+    } else if v > 70.0 {
         Color::Yellow
     } else {
         Color::Green
     }
 }
-
-fn mem_color(percent: u16) -> Color {
-    if percent > 90 {
+fn mem_c(v: u16) -> Color {
+    if v > 90 {
         Color::Red
-    } else if percent > 70 {
+    } else if v > 70 {
         Color::Yellow
     } else {
         Color::Green
     }
 }
-
-fn disk_color(percent: u16) -> Color {
-    if percent > 90 {
+fn disk_c(v: u16) -> Color {
+    if v > 90 {
         Color::Red
-    } else if percent > 70 {
+    } else if v > 70 {
         Color::Yellow
     } else {
         Color::Green

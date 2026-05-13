@@ -145,18 +145,15 @@ impl EventHandler {
     fn handle_terminal(app: &mut App, key: KeyEvent) {
         match key.code {
             KeyCode::Char(c) => {
-                // 收集命令输入
                 app.command_input.push(c);
             }
             KeyCode::Backspace => {
                 app.command_input.pop();
             }
             KeyCode::Enter => {
-                // 执行命令
                 let cmd = std::mem::take(&mut app.command_input);
                 if !cmd.is_empty() {
-                    // TODO: 如果是远程模式，通过 SSH 执行
-                    app.status_message = format!("Executed: {}", cmd);
+                    execute_builtin(app, &cmd);
                 }
             }
             _ => {}
@@ -207,5 +204,74 @@ impl EventHandler {
             _ => {}
         }
         EventResult::Continue
+    }
+}
+
+/// 执行内置命令
+fn execute_builtin(app: &mut App, cmd: &str) {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let name = parts.first().map(|s| s.to_lowercase()).unwrap_or_default();
+
+    match name.as_str() {
+        "help" => {
+            app.status_message = "Showing help".to_string();
+        }
+        "clear" => {
+            app.remote_terminal.output.clear();
+            if let Some(ref mut local) = app.local_terminal {
+                local.output.clear();
+            }
+            app.status_message = "Cleared".to_string();
+        }
+        "exit" | "quit" => {
+            app.should_quit = true;
+        }
+        "list" => {
+            let count = app.connections.len();
+            if count == 0 {
+                app.status_message = "No connections saved".to_string();
+            } else {
+                let line: Vec<String> = app
+                    .connections
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| format!("  {}: {} ({}@{})", i, c.name, c.username, c.host))
+                    .collect();
+                app.remote_terminal.output = format!("Connections:\n{}\n", line.join("\n"));
+                app.status_message = format!("{} connections listed", count);
+            }
+        }
+        "connect" => {
+            let idx_str = parts.get(1).unwrap_or(&"");
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                if idx < app.connections.len() {
+                    let conn = &app.connections[idx];
+                    app.status_message = format!("Connecting to {}...", conn.name);
+                    // TODO: actual SSH connect
+                } else {
+                    app.status_message = format!("Index {} out of range", idx);
+                }
+            } else {
+                app.status_message = "Usage: connect <index>".to_string();
+            }
+        }
+        "disconnect" => {
+            app.active_session = None;
+            app.session = None;
+            app.status_message = "Disconnected".to_string();
+        }
+        "status" => {
+            app.status_message = if app.is_connected() {
+                format!("Connected to {}", app.current_host().unwrap_or("?"))
+            } else {
+                "Not connected".to_string()
+            };
+        }
+        _ => {
+            app.status_message = format!(
+                "Unknown command: {}. Type 'help' for available commands.",
+                name
+            );
+        }
     }
 }
