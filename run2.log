@@ -1,0 +1,10 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running `target\debug\oh-my-sftp.exe`
+[INFO  oh_my_sftp] === oh-my-sftp starting ===
+[INFO  oh_my_sftp] Loaded 2 entries from ~/.ssh/config
+[INFO  oh_my_sftp] App initialized with 2 connections
+[INFO  oh_my_sftp] Starting TUI...
+[INFO  oh_my_sftp] Setting up terminal...
+[INFO  oh_my_sftp] Terminal setup complete, starting event loop...
+[INFO  oh_my_sftp] PTY initialized via background thread
+error: process didn't exit successfully: `target\debug\oh-my-sftp.exe` (exit code: 0xc000013a, STATUS_CONTROL_C_EXIT)

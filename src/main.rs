@@ -30,13 +30,21 @@ struct PtyReady {
 }
 
 fn main() -> Result<()> {
-    // 初始化日志
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+    // 初始化日志 - 使用更详细的级别以便调试
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp(None)
         .init();
 
+    log::info!("=== oh-my-sftp starting ===");
+
     // 加载配置
-    let mut app_config = config::load_config().unwrap_or_default();
+    let mut app_config = match config::load_config() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            log::warn!("Failed to load config: {}", e);
+            config::AppConfig::default()
+        }
+    };
 
     // 加载 ~/.ssh/config
     let ssh_entries = core::ssh_config::parse_ssh_config().unwrap_or_default();
@@ -56,6 +64,8 @@ fn main() -> Result<()> {
     app.settings = app_config.settings.clone();
     app.panels.connection_list.connections = app_config.connections;
 
+    log::info!("App initialized with {} connections", app.connections.len());
+
     // 在后台线程启动 PTY 初始化，不阻塞主线程
     let pty_ready_rx = spawn_pty_init();
 
@@ -64,15 +74,33 @@ fn main() -> Result<()> {
     std::panic::set_hook(Box::new(move |info| {
         // 先恢复终端
         let _ = restore_terminal();
+        // 输出 panic 信息到文件以便调试
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("panic.log")
+        {
+            use std::io::Write;
+            let _ = writeln!(file, "PANIC: {}", info);
+        }
         // 然后调用默认的 panic 处理
         default_hook(info);
     }));
 
     // 启动 TUI
+    log::info!("Starting TUI...");
     let result = run_tui(&mut app, pty_ready_rx);
 
     // 恢复终端
-    restore_terminal()?;
+    let restore_result = restore_terminal();
+    if let Err(e) = restore_result {
+        log::error!("Failed to restore terminal: {}", e);
+    }
+
+    match result {
+        Ok(()) => log::info!("=== oh-my-sftp exited normally ==="),
+        Err(ref e) => log::error!("=== oh-my-sftp exited with error: {} ===", e),
+    }
 
     result
 }
@@ -158,35 +186,48 @@ fn try_init_pty() -> Result<PtyReady> {
 
 /// 运行 TUI 主循环
 fn run_tui(app: &mut App, pty_ready_rx: mpsc::Receiver<Result<PtyReady>>) -> Result<()> {
+    log::info!("Setting up terminal...");
+
     // 设置终端
     let mut stdout = io::stdout();
-    execute!(
+    // 在 Windows 上可能需要避免使用 EnterAlternateScreen，但某些功能需要它
+    let _ = execute!(
         stdout,
         EnterAlternateScreen,
         EnableMouseCapture,
         cursor::Hide
-    )?;
+    );
     terminal::enable_raw_mode()?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend)?;
 
+    log::info!("Terminal setup complete, starting event loop...");
+
     // 事件循环
     let tick_rate = std::time::Duration::from_millis(100);
     let mut last_tick = std::time::Instant::now();
+    let mut frame_count = 0u64;
 
     loop {
-        // 绘制 — 失败不退出，继续重试
+        frame_count += 1;
+
+        // 每 100 帧输出一次日志
+        if frame_count % 100 == 0 {
+            log::debug!("Frame #{}", frame_count);
+        }
+
+        // 绘制
         if let Err(e) = terminal.draw(|f| {
             tui::render(f, app);
         }) {
             log::error!("Draw error: {}", e);
-            // 短暂休眠后重试
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
         // 检查退出
         if app.should_quit {
+            log::info!("Quit requested");
             break;
         }
 
@@ -200,19 +241,25 @@ fn run_tui(app: &mut App, pty_ready_rx: mpsc::Receiver<Result<PtyReady>>) -> Res
                 if let Ok(event) = crossterm::event::read() {
                     match event {
                         CrosstermEvent::Key(key) => match EventHandler::handle_key(app, key) {
-                            EventResult::Quit => break,
+                            EventResult::Quit => {
+                                log::info!("Quit via key event");
+                                break;
+                            }
                             EventResult::Continue => {}
                         },
-                        CrosstermEvent::Resize(_, _) => {}
+                        CrosstermEvent::Resize(w, h) => {
+                            log::debug!("Terminal resized: {}x{}", w, h);
+                        }
                         CrosstermEvent::Mouse(_) => {}
                         _ => {}
                     }
                 }
             }
-            Ok(false) => {}
+            Ok(false) => {
+                // 超时，继续循环
+            }
             Err(e) => {
                 log::error!("Event poll error: {}", e);
-                std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
 
@@ -223,13 +270,14 @@ fn run_tui(app: &mut App, pty_ready_rx: mpsc::Receiver<Result<PtyReady>>) -> Res
         }
     }
 
+    log::info!("Event loop exited after {} frames", frame_count);
     Ok(())
 }
 
 /// 定时任务
 fn on_tick(app: &mut App, pty_ready_rx: &mpsc::Receiver<Result<PtyReady>>) {
     // 检查后台 PTY 初始化是否完成
-    if app.local_terminal.is_none() {
+    if app.local_terminal.is_none() && !app.pty_init_done {
         match pty_ready_rx.try_recv() {
             Ok(Ok(ready)) => {
                 app.local_terminal = Some(app::LocalTerminal {
@@ -242,12 +290,12 @@ fn on_tick(app: &mut App, pty_ready_rx: &mpsc::Receiver<Result<PtyReady>>) {
                 });
                 app.status_message = "Local terminal ready".to_string();
                 log::info!("PTY initialized via background thread");
+                app.pty_init_done = true;
             }
             Ok(Err(e)) => {
                 log::warn!("Background PTY init failed: {}", e);
                 app.status_message = format!("PTY unavailable: {}", e);
-                // 标记已尝试（设为 None 但不再重试）
-                // 用一个特殊标记避免重复检查，这里简单置空
+                app.pty_init_done = true;
             }
             Err(mpsc::TryRecvError::Empty) => {
                 // PTY 还在初始化中，继续等待
@@ -255,6 +303,7 @@ fn on_tick(app: &mut App, pty_ready_rx: &mpsc::Receiver<Result<PtyReady>>) {
             Err(mpsc::TryRecvError::Disconnected) => {
                 log::warn!("PTY init thread disconnected unexpectedly");
                 app.status_message = "PTY init thread crashed".to_string();
+                app.pty_init_done = true;
             }
         }
     }
@@ -294,7 +343,7 @@ fn on_tick(app: &mut App, pty_ready_rx: &mpsc::Receiver<Result<PtyReady>>) {
 /// 恢复终端设置
 fn restore_terminal() -> Result<()> {
     let mut stdout = io::stdout();
-    execute!(stdout, cursor::Show, LeaveAlternateScreen)?;
+    let _ = execute!(stdout, LeaveAlternateScreen, cursor::Show);
     terminal::disable_raw_mode()?;
     Ok(())
 }

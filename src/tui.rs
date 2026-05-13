@@ -25,20 +25,27 @@ pub fn render(frame: &mut Frame, app: &App) {
         ])
         .split(area);
 
-    // Ensure chunks don't exceed area bounds
     let title_area = chunks[0];
     let main_area = chunks[1];
     let status_area = chunks[2];
 
-    // Additional guard: main area must have reasonable size
-    if main_area.height < 1 || main_area.width < 1 {
-        render_title_bar(frame, title_area, app);
-        render_status_bar(frame, status_area, app);
-        return;
+    // Debug: write render info to a file
+    #[cfg(debug_assertions)]
+    {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("render.log") {
+            let _ = writeln!(f, "render: area={}x{}, title_h={}, main_h={}, status_h={}", 
+                area.width, area.height, title_area.height, main_area.height, status_area.height);
+        }
     }
 
+    // Render title bar (always)
     render_title_bar(frame, title_area, app);
+
+    // Render main content (always, even if small)
     render_main(frame, main_area, app);
+
+    // Render status bar (always)
     render_status_bar(frame, status_area, app);
 }
 
@@ -58,10 +65,6 @@ fn render_title_bar(frame: &mut Frame, area: Rect, app: &App) {
 // --- main content ---
 
 fn render_main(frame: &mut Frame, area: Rect, app: &App) {
-    // 先填充整个主内容区背景
-    let bg = Block::default().style(Style::default().bg(Color::Black));
-    frame.render_widget(bg, area);
-
     if app.show_connection_list {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
@@ -122,52 +125,30 @@ fn render_conn_list(frame: &mut Frame, area: Rect, app: &App) {
 // --- terminal ---
 
 fn render_terminal(frame: &mut Frame, area: Rect, app: &App) {
-    // Guard: skip rendering if area is too small
-    if area.height < 8 || area.width < 10 {
-        return;
-    }
-
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(3)])
-        .split(area);
-
-    // body
-    let body_block = Block::default()
-        .title(term_title(app))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green));
-    let body_inner = body_block.inner(rows[0]);
-    frame.render_widget(body_block, rows[0]);
-
-    let body = term_body(app);
-    frame.render_widget(
-        Paragraph::new(body).style(Style::default().fg(Color::White)),
-        body_inner,
+    // Simple debug rendering
+    let debug_text = format!(
+        "Terminal Panel\nArea: {}x{}\nBody: {}\nInput: {}",
+        area.width, area.height,
+        term_body(app),
+        if app.command_input.is_empty() { "> _" } else { &app.command_input }
     );
-
-    // input
-    let input_block = Block::default()
-        .title(" Input ")
+    
+    let block = Block::default()
+        .title(" Terminal ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
-    let input_inner = input_block.inner(rows[1]);
-    frame.render_widget(input_block, rows[1]);
-
-    let txt = if app.command_input.is_empty() {
-        "> _".to_string()
-    } else {
-        format!("> {}", app.command_input)
-    };
+        .border_style(Style::default().fg(Color::Green))
+        .style(Style::default().bg(Color::DarkGray).fg(Color::White));
+    
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
     frame.render_widget(
-        Paragraph::new(txt).style(Style::default().fg(Color::White)),
-        input_inner,
+        Paragraph::new(debug_text).style(Style::default().fg(Color::White)),
+        inner,
     );
-
-    // Set cursor with proper bounds checking
-    let cx = input_inner.x.saturating_add(2).saturating_add(app.command_input.len() as u16);
-    if cx < input_inner.right() && input_inner.y < area.bottom() {
-        frame.set_cursor_position((cx, input_inner.y));
+    
+    // Set cursor at bottom
+    if area.height > 2 {
+        frame.set_cursor_position((area.x + 2, area.bottom() - 2));
     }
 }
 
@@ -235,11 +216,6 @@ fn term_body(app: &App) -> String {
 // --- file manager ---
 
 fn render_files(frame: &mut Frame, area: Rect, app: &App) {
-    // Guard: skip if area is too small
-    if area.height < 3 || area.width < 10 {
-        return;
-    }
-
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -283,11 +259,6 @@ fn render_files(frame: &mut Frame, area: Rect, app: &App) {
 // --- dashboard ---
 
 fn render_dashboard(frame: &mut Frame, area: Rect, app: &App) {
-    // Guard: dashboard needs at least 11 rows (3+3+3+2)
-    if area.height < 11 || area.width < 10 {
-        return;
-    }
-
     let r = &app.resources;
     let rows = Layout::default()
         .direction(Direction::Vertical)

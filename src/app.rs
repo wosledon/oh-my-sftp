@@ -97,6 +97,9 @@ pub struct App {
 
     // 资源刷新相关
     pub last_resource_refresh: std::time::Instant,
+
+    // PTY 初始化状态
+    pub pty_init_done: bool,
 }
 
 #[allow(dead_code)]
@@ -136,6 +139,7 @@ impl App {
             editing_connection: false,
             settings: AppSettings::default(),
             last_resource_refresh: std::time::Instant::now(),
+            pty_init_done: false,
         }
     }
 
