@@ -165,10 +165,14 @@ fn run_tui(app: &mut App, pty_ready_rx: mpsc::Receiver<Result<PtyReady>>) -> Res
     let mut last_tick = std::time::Instant::now();
 
     loop {
-        // 绘制
-        terminal.draw(|f| {
+        // 绘制 — 失败不退出，继续重试
+        if let Err(e) = terminal.draw(|f| {
             tui::render(f, app);
-        })?;
+        }) {
+            log::error!("Draw error: {}", e);
+            // 短暂休眠后重试
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
 
         // 检查退出
         if app.should_quit {
@@ -180,23 +184,28 @@ fn run_tui(app: &mut App, pty_ready_rx: mpsc::Receiver<Result<PtyReady>>) -> Res
             .checked_sub(last_tick.elapsed())
             .unwrap_or_else(|| std::time::Duration::from_millis(0));
 
-        if crossterm::event::poll(timeout)? {
-            match crossterm::event::read()? {
-                CrosstermEvent::Key(key) => match EventHandler::handle_key(app, key) {
-                    EventResult::Quit => break,
-                    EventResult::Continue => {}
-                },
-                CrosstermEvent::Resize(_, _) => {
-                    // 窗口大小变化
+        match crossterm::event::poll(timeout) {
+            Ok(true) => {
+                if let Ok(event) = crossterm::event::read() {
+                    match event {
+                        CrosstermEvent::Key(key) => match EventHandler::handle_key(app, key) {
+                            EventResult::Quit => break,
+                            EventResult::Continue => {}
+                        },
+                        CrosstermEvent::Resize(_, _) => {}
+                        CrosstermEvent::Mouse(_) => {}
+                        _ => {}
+                    }
                 }
-                CrosstermEvent::Mouse(_) => {
-                    // 鼠标事件（暂不处理）
-                }
-                _ => {}
+            }
+            Ok(false) => {}
+            Err(e) => {
+                log::error!("Event poll error: {}", e);
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
 
-        // Tick 事件（用于资源刷新等定时任务）
+        // Tick 事件
         if last_tick.elapsed() >= tick_rate {
             on_tick(app, &pty_ready_rx);
             last_tick = std::time::Instant::now();
