@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 /// 展开 home 目录中的 ~ 符号
+#[allow(dead_code)]
 pub fn expand_home(path: &str) -> PathBuf {
     if path.starts_with('~') {
         if let Some(home) = dirs::home_dir() {
@@ -16,6 +17,7 @@ pub fn expand_home(path: &str) -> PathBuf {
 }
 
 /// 缩短路径显示（显示最后 N 级 + 前缀 ...）
+#[allow(dead_code)]
 pub fn shorten_path(path: &Path, max_levels: usize) -> String {
     let path_str = path.to_string_lossy();
     let components: Vec<&str> = path_str
@@ -37,6 +39,7 @@ pub fn shorten_path(path: &Path, max_levels: usize) -> String {
 }
 
 /// 获取文件名，如果路径是目录则在末尾加 /
+#[allow(dead_code)]
 pub fn display_name(path: &Path) -> String {
     let name = path
         .file_name()

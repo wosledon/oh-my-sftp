@@ -8,6 +8,7 @@ use std::time::Duration;
 /// SSH 服务：管理 SSH 连接生命周期
 pub struct SshService;
 
+#[allow(dead_code)]
 impl SshService {
     /// 建立 SSH 连接
     pub fn connect(conn: &Connection, timeout_secs: u64) -> Result<(Session, TcpStream)> {

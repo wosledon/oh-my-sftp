@@ -26,6 +26,7 @@ struct PtyReady {
     writer: Box<dyn std::io::Write + Send>,
     rx: mpsc::Receiver<String>,
     _pair: portable_pty::PtyPair,
+    _child: Box<dyn portable_pty::Child + Send>,
 }
 
 fn main() -> Result<()> {
@@ -57,6 +58,15 @@ fn main() -> Result<()> {
 
     // 在后台线程启动 PTY 初始化，不阻塞主线程
     let pty_ready_rx = spawn_pty_init();
+
+    // 设置 panic hook 以便在崩溃时恢复终端
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // 先恢复终端
+        let _ = restore_terminal();
+        // 然后调用默认的 panic 处理
+        default_hook(info);
+    }));
 
     // 启动 TUI
     let result = run_tui(&mut app, pty_ready_rx);
@@ -104,7 +114,7 @@ fn try_init_pty() -> Result<PtyReady> {
         .openpty(pty_size)
         .map_err(|e| anyhow::anyhow!("Failed to open PTY: {}", e))?;
 
-    let _child = pair
+    let child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| anyhow::anyhow!("Failed to spawn shell: {}", e))?;
@@ -142,6 +152,7 @@ fn try_init_pty() -> Result<PtyReady> {
         writer,
         rx,
         _pair: pair,
+        _child: child,
     })
 }
 
@@ -225,6 +236,7 @@ fn on_tick(app: &mut App, pty_ready_rx: &mpsc::Receiver<Result<PtyReady>>) {
                     writer: Some(ready.writer),
                     pty_rx: Some(ready.rx),
                     _pty_pair: Some(ready._pair),
+                    _child: Some(ready._child),
                     output: String::new(),
                     scrollback: Vec::new(),
                 });

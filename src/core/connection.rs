@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// SSH 认证方式
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AuthMethod {
     /// 密码认证（加密存储的 base64 编码值）
@@ -13,6 +14,7 @@ pub enum AuthMethod {
 }
 
 /// 连接状态
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionStatus {
     Disconnected,
@@ -43,6 +45,7 @@ pub struct Connection {
 }
 
 /// 传输方向
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferDirection {
     Upload,
@@ -50,6 +53,7 @@ pub enum TransferDirection {
 }
 
 /// 传输任务状态
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferStatus {
     Pending,
@@ -59,6 +63,7 @@ pub enum TransferStatus {
 }
 
 /// 文件传输任务
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TransferTask {
     pub id: String,
@@ -84,6 +89,7 @@ pub struct SystemResources {
 }
 
 /// 活跃的 SSH 会话
+#[allow(dead_code)]
 pub struct ActiveSession {
     pub connection_id: String,
     pub session: ssh2::Session,
@@ -91,6 +97,7 @@ pub struct ActiveSession {
 }
 
 /// 应用面板
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Panel {
     Terminal,
@@ -99,6 +106,7 @@ pub enum Panel {
     ConnectionList,
 }
 
+#[allow(dead_code)]
 impl Connection {
     pub fn new(name: &str, host: &str, port: u16, username: &str, auth: AuthMethod) -> Self {
         Self {
@@ -134,6 +142,7 @@ impl Connection {
     }
 }
 
+#[allow(dead_code)]
 impl TransferTask {
     pub fn progress_percent(&self) -> f64 {
         if self.total_bytes == 0 {

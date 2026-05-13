@@ -11,6 +11,11 @@ use ratatui::{
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
+    // Guard: skip rendering if terminal is too small
+    if area.height < 3 || area.width < 10 {
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -20,9 +25,21 @@ pub fn render(frame: &mut Frame, app: &App) {
         ])
         .split(area);
 
-    render_title_bar(frame, chunks[0], app);
-    render_main(frame, chunks[1], app);
-    render_status_bar(frame, chunks[2], app);
+    // Ensure chunks don't exceed area bounds
+    let title_area = chunks[0];
+    let main_area = chunks[1];
+    let status_area = chunks[2];
+
+    // Additional guard: main area must have reasonable size
+    if main_area.height < 1 || main_area.width < 1 {
+        render_title_bar(frame, title_area, app);
+        render_status_bar(frame, status_area, app);
+        return;
+    }
+
+    render_title_bar(frame, title_area, app);
+    render_main(frame, main_area, app);
+    render_status_bar(frame, status_area, app);
 }
 
 // --- title bar ---
@@ -105,6 +122,11 @@ fn render_conn_list(frame: &mut Frame, area: Rect, app: &App) {
 // --- terminal ---
 
 fn render_terminal(frame: &mut Frame, area: Rect, app: &App) {
+    // Guard: skip rendering if area is too small
+    if area.height < 8 || area.width < 10 {
+        return;
+    }
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(3), Constraint::Length(3)])
@@ -142,8 +164,9 @@ fn render_terminal(frame: &mut Frame, area: Rect, app: &App) {
         input_inner,
     );
 
-    let cx = input_inner.x + 2 + app.command_input.len() as u16;
-    if cx < input_inner.right() {
+    // Set cursor with proper bounds checking
+    let cx = input_inner.x.saturating_add(2).saturating_add(app.command_input.len() as u16);
+    if cx < input_inner.right() && input_inner.y < area.bottom() {
         frame.set_cursor_position((cx, input_inner.y));
     }
 }
@@ -212,6 +235,11 @@ fn term_body(app: &App) -> String {
 // --- file manager ---
 
 fn render_files(frame: &mut Frame, area: Rect, app: &App) {
+    // Guard: skip if area is too small
+    if area.height < 3 || area.width < 10 {
+        return;
+    }
+
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -255,6 +283,11 @@ fn render_files(frame: &mut Frame, area: Rect, app: &App) {
 // --- dashboard ---
 
 fn render_dashboard(frame: &mut Frame, area: Rect, app: &App) {
+    // Guard: dashboard needs at least 11 rows (3+3+3+2)
+    if area.height < 11 || area.width < 10 {
+        return;
+    }
+
     let r = &app.resources;
     let rows = Layout::default()
         .direction(Direction::Vertical)

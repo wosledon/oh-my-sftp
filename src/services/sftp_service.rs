@@ -8,11 +8,13 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 /// SFTP 文件传输服务
+#[allow(dead_code)]
 pub struct SftpService {
     sftp: Sftp,
     transfer_queue: Arc<Mutex<Vec<TransferTask>>>,
 }
 
+#[allow(dead_code)]
 impl SftpService {
     /// 创建 SFTP 服务实例
     pub fn new(session: &Session) -> Result<Self> {
@@ -196,6 +198,7 @@ impl SftpService {
 }
 
 /// SFTP 目录条目
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SftpEntry {
     pub name: String,
@@ -205,6 +208,7 @@ pub struct SftpEntry {
     pub mtime: u64,
 }
 
+#[allow(dead_code)]
 impl SftpEntry {
     pub fn format_size(&self) -> String {
         if self.is_dir {
