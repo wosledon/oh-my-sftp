@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 
@@ -29,16 +29,6 @@ pub fn render(frame: &mut Frame, app: &App) {
     let main_area = chunks[1];
     let status_area = chunks[2];
 
-    // Debug: write render info to a file
-    #[cfg(debug_assertions)]
-    {
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("render.log") {
-            let _ = writeln!(f, "render: area={}x{}, title_h={}, main_h={}, status_h={}", 
-                area.width, area.height, title_area.height, main_area.height, status_area.height);
-        }
-    }
-
     // Render title bar (always)
     render_title_bar(frame, title_area, app);
 
@@ -52,10 +42,12 @@ pub fn render(frame: &mut Frame, app: &App) {
 // --- title bar ---
 
 fn render_title_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let bg = Block::default().style(Style::default().bg(Color::Blue));
-    frame.render_widget(bg, area);
-
     let title = format!(" oh-my-sftp v0.1.0 | [{}] ", panel_name(&app.active_panel));
+    let block = Block::default()
+        .style(Style::default().bg(Color::Blue).fg(Color::White))
+        .borders(Borders::NONE);
+    
+    frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(title).style(Style::default().fg(Color::White).bg(Color::Blue)),
         area,
@@ -125,30 +117,57 @@ fn render_conn_list(frame: &mut Frame, area: Rect, app: &App) {
 // --- terminal ---
 
 fn render_terminal(frame: &mut Frame, area: Rect, app: &App) {
-    // Simple debug rendering
-    let debug_text = format!(
-        "Terminal Panel\nArea: {}x{}\nBody: {}\nInput: {}",
-        area.width, area.height,
-        term_body(app),
-        if app.command_input.is_empty() { "> _" } else { &app.command_input }
-    );
-    
-    let block = Block::default()
-        .title(" Terminal ")
+    // Use simple layout: body takes most space, input at bottom
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(3)])
+        .split(area);
+
+    // body with visible border and background
+    let body_block = Block::default()
+        .title(term_title(app))
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Plain)
         .border_style(Style::default().fg(Color::Green))
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White));
-    
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+        .style(Style::default().bg(Color::DarkGray));
+    let body_inner = body_block.inner(rows[0]);
+    frame.render_widget(body_block, rows[0]);
+
+    let body = term_body(app);
     frame.render_widget(
-        Paragraph::new(debug_text).style(Style::default().fg(Color::White)),
-        inner,
+        Paragraph::new(body)
+            .style(Style::default().fg(Color::White))
+            .wrap(Wrap { trim: true }),
+        body_inner,
     );
-    
-    // Set cursor at bottom
-    if area.height > 2 {
-        frame.set_cursor_position((area.x + 2, area.bottom() - 2));
+
+    // input with visible border and background
+    let input_block = Block::default()
+        .title(" Input ")
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Plain)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::DarkGray));
+    let input_inner = input_block.inner(rows[1]);
+    frame.render_widget(input_block, rows[1]);
+
+    let txt = if app.command_input.is_empty() {
+        "> _".to_string()
+    } else {
+        format!("> {}", app.command_input)
+    };
+    frame.render_widget(
+        Paragraph::new(txt).style(Style::default().fg(Color::White)),
+        input_inner,
+    );
+
+    // Set cursor with proper bounds checking
+    let cx = input_inner
+        .x
+        .saturating_add(2)
+        .saturating_add(app.command_input.len() as u16);
+    if cx < input_inner.right() && input_inner.y < area.bottom() {
+        frame.set_cursor_position((cx, input_inner.y));
     }
 }
 
@@ -183,13 +202,13 @@ fn term_body(app: &App) -> String {
         }
     } else if let Some(ref local) = app.local_terminal {
         if local.output.is_empty() {
-            "Local terminal started. Waiting...\nCtrl+O open connections | Type 'help' for commands\n".to_string()
+            "Local terminal started.\nCtrl+O: connections | Ctrl+T: terminal | Ctrl+C: quit\n".to_string()
         } else {
             local.output.clone()
         }
     } else {
         let hint = if app.status_message.contains("PTY init") {
-            "PTY initializing in background..."
+            "PTY initializing..."
         } else {
             &app.status_message
         };

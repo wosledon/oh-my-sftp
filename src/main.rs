@@ -190,13 +190,13 @@ fn run_tui(app: &mut App, pty_ready_rx: mpsc::Receiver<Result<PtyReady>>) -> Res
 
     // 设置终端
     let mut stdout = io::stdout();
-    // 在 Windows 上可能需要避免使用 EnterAlternateScreen，但某些功能需要它
-    let _ = execute!(
+    // 使用 EnterAlternateScreen 确保 TUI 使用备用缓冲区
+    execute!(
         stdout,
         EnterAlternateScreen,
         EnableMouseCapture,
         cursor::Hide
-    );
+    )?;
     terminal::enable_raw_mode()?;
 
     let backend = CrosstermBackend::new(stdout);
