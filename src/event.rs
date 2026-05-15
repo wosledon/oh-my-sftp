@@ -431,7 +431,12 @@ fn execute_builtin(app: &mut App, cmd: &str) {
                         }
                         Err(e) => {
                             app.status_message = format!("Connection failed: {}", e);
-                            let msg = format!("Failed to connect to {}:\n{}\n\nTip: Check if the server is reachable and credentials are correct.\n", conn.name, e);
+                            let msg = format!(
+                                "Failed to connect to {} ({}:{}):\n{}\n\n\
+                                Tip: If error mentions 'agent pipe', ensure ssh-agent is running or configure 'IdentityFile' in ~/.ssh/config.\n\
+                                Tip: Check if the server is reachable and credentials are correct.\n",
+                                conn.name, conn.host, conn.port, e
+                            );
                             // Since connection failed, we are likely still disconnected, so print to local if possible, or just status
                             if let Some(ref mut local) = app.local_terminal {
                                 local.output = msg;

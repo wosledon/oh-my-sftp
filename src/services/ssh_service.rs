@@ -15,9 +15,17 @@ impl SshService {
         let addr = format!("{}:{}", conn.host, conn.port);
         let timeout = Duration::from_secs(timeout_secs);
 
-        let tcp =
-            TcpStream::connect_timeout(&addr.parse().context("Invalid socket address")?, timeout)
-                .with_context(|| format!("Failed to connect to {}", addr))?;
+        log::info!(
+            "Attempting SSH connection to {} (timeout: {}s)",
+            addr,
+            timeout_secs
+        );
+
+        let tcp = TcpStream::connect_timeout(
+            &addr.parse().context("Invalid socket address")?,
+            timeout,
+        )
+        .with_context(|| format!("Failed to connect to {} (check host/port/firewall)", addr))?;
 
         tcp.set_read_timeout(Some(timeout))?;
         tcp.set_write_timeout(Some(timeout))?;
@@ -27,9 +35,15 @@ impl SshService {
         session.set_tcp_stream(tcp.try_clone()?);
         session.handshake()?;
 
+        log::info!(
+            "Handshake successful. Authenticating with {:?}",
+            conn.auth_method
+        );
+
         // 认证
         Self::authenticate(&session, conn)?;
 
+        log::info!("Authentication successful.");
         Ok((session, tcp))
     }
 
@@ -37,7 +51,6 @@ impl SshService {
     fn authenticate(session: &Session, conn: &Connection) -> Result<()> {
         match &conn.auth_method {
             AuthMethod::Password(encoded_pwd) => {
-                // 简单 base64 解码（生产环境应使用 OS keyring）
                 let password = Self::decode_password(encoded_pwd)?;
                 session
                     .userauth_password(&conn.username, &password)
@@ -48,15 +61,31 @@ impl SshService {
                     .userauth_pubkey_file(&conn.username, None, key_path, None)
                     .with_context(|| {
                         format!(
-                            "Key auth failed for {} with key {:?}",
+                            "Key auth failed for {} with key {:?}. Check if the key exists and is valid.",
                             conn.username, key_path
                         )
                     })?;
             }
             AuthMethod::Agent => {
                 // 尝试 agent 认证
-                let mut agent = session.agent().context("SSH agent not available")?;
-                agent.connect()?;
+                let agent_result = session.agent();
+                if agent_result.is_err() {
+                    anyhow::bail!(
+                        "SSH Agent authentication failed: Agent not available or not running.\n\
+                         Tip: Ensure 'ssh-agent' service is running on Windows, or configure 'IdentityFile' in ~/.ssh/config."
+                    );
+                }
+
+                let mut agent = agent_result.unwrap();
+                if let Err(e) = agent.connect() {
+                    anyhow::bail!(
+                        "SSH Agent authentication failed: Unable to connect to agent pipe.\n\
+                         Error: {}\n\
+                         Tip: Ensure 'ssh-agent' service is running (e.g., 'Start-Service ssh-agent'), or configure 'IdentityFile' in ~/.ssh/config.",
+                        e
+                    );
+                }
+
                 agent.list_identities()?;
 
                 let identities = agent.identities()?;
@@ -70,7 +99,11 @@ impl SshService {
                 }
 
                 if !authenticated {
-                    anyhow::bail!("Agent auth failed: no valid identity found");
+                    anyhow::bail!(
+                        "SSH Agent authentication failed: No valid identity found for user '{}'.\n\
+                         Tip: Add your key to the agent using 'ssh-add', or configure 'IdentityFile' in ~/.ssh/config.",
+                        conn.username
+                    );
                 }
             }
         }

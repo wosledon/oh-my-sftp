@@ -8,6 +8,55 @@ use ratatui::{
     Frame,
 };
 
+/// Strip ANSI escape codes and clean text for TUI rendering
+/// This removes all ANSI escape sequences and only keeps readable ASCII text
+fn strip_ansi(text: &str) -> String {
+    let mut result = String::new();
+    let mut skip = false;
+
+    for ch in text.chars() {
+        if ch == '\x1b' {
+            skip = true;
+            continue;
+        }
+
+        if skip {
+            // Skip until we hit a letter (end of ANSI sequence)
+            // Also skip common ANSI sequence characters
+            if ch.is_ascii_alphabetic() || ch == '[' || ch == ']' || ch == '(' || ch == ')' {
+                if ch.is_ascii_alphabetic() {
+                    skip = false;
+                }
+            }
+            // Skip digits and semicolons (part of ANSI params)
+            if ch.is_ascii_digit() || ch == ';' || ch == ':' || ch == '?' || ch == '!' {
+                continue;
+            }
+            continue;
+        }
+
+        match ch {
+            '\r' => continue, // Skip carriage returns
+            '\n' | '\t' => result.push(ch),
+            // Only keep printable ASCII (space through tilde)
+            c if c >= ' ' && c <= '~' => result.push(c),
+            // Skip everything else including Unicode blocks
+            _ => {}
+        }
+    }
+    result
+}
+
+/// Clean terminal output by stripping ANSI codes and normalizing
+fn clean_terminal_output(text: &str) -> String {
+    let stripped = strip_ansi(text);
+    stripped
+        .lines()
+        .map(|line| line.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
@@ -35,11 +84,11 @@ pub fn render(frame: &mut Frame, app: &App) {
 
 fn render_title_bar(frame: &mut Frame, area: Rect, app: &App) {
     let title = format!(" oh-my-sftp v0.1.0 | [{}] ", panel_name(&app.active_panel));
-    
+
     let block = Block::default()
         .style(Style::default().bg(Color::Blue))
         .borders(Borders::NONE);
-    
+
     frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(title).style(Style::default().fg(Color::White).bg(Color::Blue)),
@@ -55,7 +104,7 @@ fn render_main_content(frame: &mut Frame, area: Rect, app: &App) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
             .split(area);
-        
+
         render_connection_list(frame, cols[0], app);
         render_active_panel(frame, cols[1], app);
     } else {
@@ -81,20 +130,25 @@ fn render_terminal_panel(frame: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
         .split(area);
 
-    // 输出区
+    // 输出区 - 使用 ANSI 转义码清理，确保输出干净可读
     let output_block = Block::default()
         .title(" Terminal ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
-        .style(Style::default().bg(Color::Black));
-    
+        .style(Style::default().bg(Color::Rgb(20, 20, 20)));
+
     let output_inner = output_block.inner(rows[0]);
     frame.render_widget(output_block, rows[0]);
-    
-    let output_text = get_terminal_output(app);
+
+    // get_terminal_output already strips ANSI codes and cleans output
+    let clean_output = get_terminal_output(app);
     frame.render_widget(
-        Paragraph::new(output_text)
-            .style(Style::default().fg(Color::White))
+        Paragraph::new(clean_output)
+            .style(
+                Style::default()
+                    .fg(Color::Rgb(220, 220, 220))
+                    .bg(Color::Rgb(20, 20, 20)),
+            )
             .wrap(Wrap { trim: true }),
         output_inner,
     );
@@ -105,30 +159,33 @@ fn render_terminal_panel(frame: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .style(Style::default().bg(Color::Black));
-    
+
     let input_inner = input_block.inner(rows[1]);
     frame.render_widget(input_block, rows[1]);
-    
+
     let input_text = if app.command_input.is_empty() {
         "> _".to_string()
     } else {
         format!("> {}", app.command_input)
     };
-    
+
     frame.render_widget(
         Paragraph::new(input_text).style(Style::default().fg(Color::White)),
         input_inner,
     );
 
     // 设置光标位置
-    let cx = input_inner.x.saturating_add(2).saturating_add(app.command_input.len() as u16);
+    let cx = input_inner
+        .x
+        .saturating_add(2)
+        .saturating_add(app.command_input.len() as u16);
     if cx < input_inner.right() && input_inner.y < area.bottom() {
         frame.set_cursor_position((cx, input_inner.y));
     }
 }
 
 fn get_terminal_output(app: &App) -> String {
-    if app.is_connected() {
+    let raw = if app.is_connected() {
         if app.remote_terminal.output.is_empty() {
             format!(
                 "Connected to {}.\nType 'help' for commands.\n",
@@ -139,13 +196,16 @@ fn get_terminal_output(app: &App) -> String {
         }
     } else if let Some(ref local) = app.local_terminal {
         if local.output.is_empty() {
-            "Local terminal ready.\nCtrl+O: connections | Ctrl+T: terminal | Ctrl+C: quit\n".to_string()
+            "Local terminal ready.\nCtrl+O: connections | Ctrl+T: terminal | Ctrl+C: quit\n"
+                .to_string()
         } else {
             local.output.clone()
         }
     } else {
         "Initializing terminal...\n".to_string()
-    }
+    };
+    // Always clean the output - strip ANSI codes and normalize
+    clean_terminal_output(&raw)
 }
 
 // ==================== 文件管理面板 ====================
@@ -161,12 +221,11 @@ fn render_file_manager_panel(frame: &mut Frame, area: Rect, app: &App) {
         .title(format!(" Local: {} ", app.local_cwd.display()))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Blue));
-    
+
     let local_inner = local_block.inner(cols[0]);
     frame.render_widget(local_block, cols[0]);
     frame.render_widget(
-        Paragraph::new("(local files - coming soon)")
-            .style(Style::default().fg(Color::White)),
+        Paragraph::new("(local files - coming soon)").style(Style::default().fg(Color::White)),
         local_inner,
     );
 
@@ -175,7 +234,7 @@ fn render_file_manager_panel(frame: &mut Frame, area: Rect, app: &App) {
         .title(format!(" Remote: {} ", app.remote_cwd.display()))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Magenta));
-    
+
     let remote_inner = remote_block.inner(cols[1]);
     frame.render_widget(remote_block, cols[1]);
 
@@ -187,7 +246,9 @@ fn render_file_manager_panel(frame: &mut Frame, area: Rect, app: &App) {
         .enumerate()
         .map(|(i, e)| {
             let style = if i == app.panels.file_manager.selected_index {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -275,7 +336,7 @@ fn render_connection_list(frame: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
         .style(Style::default().bg(Color::Black));
-    
+
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -297,8 +358,14 @@ fn render_connection_list(frame: &mut Frame, area: Rect, app: &App) {
                 } else {
                     Style::default().fg(Color::White)
                 };
+                // Show port if it's not the default 22
+                let port_str = if c.port != 22 {
+                    format!(":{}", c.port)
+                } else {
+                    String::new()
+                };
                 ListItem::new(Line::from(Span::styled(
-                    format!(" {} ({}@{})", c.name, c.username, c.host),
+                    format!(" {} ({}@{}{})", c.name, c.username, c.host, port_str),
                     style,
                 )))
             })
