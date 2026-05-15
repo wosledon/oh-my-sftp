@@ -1,0 +1,4 @@
+[INFO  oh_my_sftp] === oh-my-sftp starting ===
+[INFO  oh_my_sftp] Loaded 2 entries from ~/.ssh/config
+[INFO  oh_my_sftp] App initialized with 2 connections
+[INFO  oh_my_sftp] Terminal setup complete, starting event loop...

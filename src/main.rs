@@ -21,10 +21,25 @@ use ratatui::backend::CrosstermBackend;
 use std::io;
 
 fn main() -> Result<()> {
-    // 初始化日志
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp(None)
-        .init();
+    // 初始化日志 - 重定向到文件避免干扰 TUI
+    // 日志会写入 oh-my-sftp.log 文件，不会出现在终端 UI 中
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("oh-my-sftp.log")
+        .ok();
+
+    if let Some(file) = log_file {
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .format_timestamp(None)
+            .target(env_logger::Target::Pipe(Box::new(file)))
+            .init();
+    } else {
+        // 如果无法创建文件，禁用日志输出避免干扰 TUI
+        env_logger::Builder::new()
+            .filter_level(log::LevelFilter::Off)
+            .init();
+    }
 
     log::info!("=== oh-my-sftp starting ===");
 
