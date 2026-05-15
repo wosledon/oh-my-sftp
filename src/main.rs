@@ -127,15 +127,13 @@ fn run_tui(app: &mut App) -> Result<()> {
             Ok(true) => {
                 if let Ok(event) = crossterm::event::read() {
                     match event {
-                        CrosstermEvent::Key(key) => {
-                            match EventHandler::handle_key(app, key) {
-                                EventResult::Quit => {
-                                    log::info!("Quit via key event");
-                                    break;
-                                }
-                                EventResult::Continue => {}
+                        CrosstermEvent::Key(key) => match EventHandler::handle_key(app, key) {
+                            EventResult::Quit => {
+                                log::info!("Quit via key event");
+                                break;
                             }
-                        }
+                            EventResult::Continue => {}
+                        },
                         CrosstermEvent::Resize(w, h) => {
                             log::debug!("Terminal resized: {}x{}", w, h);
                         }
@@ -189,7 +187,12 @@ fn on_tick(app: &mut App) {
 /// 恢复终端设置
 fn restore_terminal() -> Result<()> {
     let mut stdout = io::stdout();
-    let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
+    let _ = execute!(
+        stdout,
+        LeaveAlternateScreen,
+        DisableMouseCapture,
+        cursor::Show
+    );
     terminal::disable_raw_mode()?;
     Ok(())
 }
